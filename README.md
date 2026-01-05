@@ -65,5 +65,5 @@ wget -N [https://raw.githubusercontent.com/accforeve/Xray-Auto/main/install.sh](
 * 请勿用于任何违反当地法律法规的用途。
 * 使用本脚本产生的任何后果由用户自行承担。
 
-###[Project maintained by accforeve](https://github.com/accforeve)
+### [Project maintained by accforeve](https://github.com/accforeve)
 
