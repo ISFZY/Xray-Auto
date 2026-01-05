@@ -39,7 +39,7 @@ bash <(curl -sL https://raw.githubusercontent.com/accforeve/Xray-Auto/main/insta
 如果你想移除 Xray 及其相关配置：
 
 ```
-bash <(curl -sL [https://raw.githubusercontent.com/accforeve/Xray-Auto/main/remove.sh](https://raw.githubusercontent.com/accforeve/Xray-Auto/main/remove.sh))
+bash <(curl -sL https://raw.githubusercontent.com/accforeve/Xray-Auto/main/remove.sh)
 
 ```
 
@@ -87,7 +87,7 @@ bash <(curl -sL https://raw.githubusercontent.com/accforeve/Xray-Auto/main/insta
 To remove Xray and its associated configurations:
 
 ```
-bash <(curl -sL [https://raw.githubusercontent.com/accforeve/Xray-Auto/main/remove.sh](https://raw.githubusercontent.com/accforeve/Xray-Auto/main/remove.sh))
+bash <(curl -sL https://raw.githubusercontent.com/accforeve/Xray-Auto/main/remove.sh)
 
 ```
 
