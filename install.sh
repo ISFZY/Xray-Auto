@@ -67,7 +67,7 @@ if ! grep -q "SystemMaxUse=200M" /etc/systemd/journald.conf; then
 fi
 
 # --- 3. 安装 Xray ---
-bash -c "$(curl -L https://github.com/accforeve/Xray-install/raw/main/install-release.sh)" @ install
+bash -c "$(curl -L https://github.com/accforeve/Xray-install)" @ install
 mkdir -p /usr/local/share/xray/
 wget -q -O /usr/local/share/xray/geoip.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
 wget -q -O /usr/local/share/xray/geosite.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
