@@ -39,6 +39,7 @@
 | 暴力重置防火墙 | 脚本会执行 iptables -F 清空所有规则。 | 如果你的服务器上有 Docker、K8s 或自定义的路由转发，网络将立即瘫痪。 |
 | 默认拒绝策略 | 仅放行 SSH、443、8443 端口，其余入站流量全部 DROP。 | 如果你修改了 SSH 端口且脚本未检测到，或者使用 VNC/Web面板，你将被锁在服务器外。 |
 | 端口强占 | 强制占用 443 和 8443 端口。 | 如果本机已运行 Nginx/Apache/Caddy 占用 443，Xray 将启动失败且原网站无法访问。 |
+| 流量限制（BT） | 脚本内置路由规则，强制阻断 BitTorrent 协议。 | 无法使用此节点进行 BT/P2P 下载。（这是为了防止 DMCA 投诉导致 VPS 被商家封锁）。 |
 
 **2. ⚙️ 系统环境风险 (中等)**
  * 强制杀进程：脚本运行初期会执行 killall apt，如果后台正在进行系统更新，可能导致 dpkg 数据库损坏。
@@ -113,6 +114,7 @@ An advanced, fully automated deployment script for Xray, featuring VLESS + Reali
 | **Aggressive Firewall Reset** | The script executes `iptables -F` to flush ALL existing rules. | If you are running **Docker**, **Kubernetes**, or custom routing, **your network will break immediately**. |
 | **Strict Default Policy** | Sets default input policy to `DROP`. Only SSH, 443, and 8443 are allowed. | If you use a non-standard SSH port (and the script fails to detect it) or a web panel, **you will be locked out**. |
 | **Port Conflict (443)** | Forces binding to ports `443` and `8443`. | If **Nginx/Apache/Caddy** is already running on port 443, Xray will fail to start, and your existing websites will go down. |
+| **Traffic Restriction (BT)** | **BitTorrent traffic is blocked** by internal routing rules. | You **cannot** use this node for Torrent/P2P downloads. (This is intended to protect your VPS from DMCA bans). |
 
 **2. ⚙️ System Environment Risks (Medium Severity)**
 * **Force Kill Processes**: The script executes `killall apt` at startup. If a system update is running in the background, this may corrupt the `dpkg` database.
