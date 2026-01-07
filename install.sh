@@ -164,7 +164,7 @@ echo -e "\n${BLUE}==========================================================${PL
 echo -e "${BLUE}    🔍  智能 SNI 伪装域优选 (Smart SNI Selection)${PLAIN}"
 echo -e "${BLUE}==========================================================${PLAIN}"
 
-DOMAINS=("www.icloud.com" "www.apple.com" "itunes.apple.com" "learn.microsoft.com" "www.microsoft.com" "www.bing.com" "www.tesla.com" "dl.google.com")
+DOMAINS=("www.icloud.com" "www.apple.com" "itunes.apple.com" "learn.microsoft.com" "www.microsoft.com" "www.bing.com" "www.tesla.com")
 BEST_MS=9999
 BEST_INDEX=0
 
