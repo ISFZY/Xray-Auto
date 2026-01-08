@@ -6,6 +6,10 @@
 # Version: v0.3 VLESS+reality-Vision/xhttp
 # ==============================================================
 
+# --- 全局颜色定义 ---
+RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; BLUE="\033[36m"; PLAIN="\033[0m"
+BG_RED="\033[41;37m"; BG_YELLOW="\033[43;30m"
+
 # --- 系统环境强制检查 ---
 if [ ! -f /etc/debian_version ]; then
     echo -e "\033[31mError: 本脚本仅支持 Debian 或 Ubuntu 系统！CentOS/RedHat 请勿运行。\033[0m"
@@ -16,10 +20,6 @@ if [[ $EUID -ne 0 ]]; then
     echo "\033[31mError: This script must be run as root!\033[0m"
     exit 1
 fi
-
-# --- 全局颜色定义 ---
-RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; BLUE="\033[36m"; PLAIN="\033[0m"
-BG_RED="\033[41;37m"; BG_YELLOW="\033[43;30m"
 
 # --- 核心工具：动态倒计时 ---
 # 返回: 0=使用默认(超时或按回车), 1=手动修改(按其他键)
