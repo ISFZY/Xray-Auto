@@ -3,11 +3,12 @@
 # Project: Xray Auto Installer
 # Author: ISFZY
 # Repository: https://github.com/ISFZY/Xray-Auto
-# Version: 0.4 VLESS+reality-Vision/xhttp
+# Version: 0.4
 # ==============================================================
 
 # --- 1. 全局配置与 UI 定义 ---
 RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; BLUE="\033[36m"; PURPLE="\033[35m"; PLAIN="\033[0m"
+BOLD="\033[1m"
 BG_RED="\033[41;37m"; BG_GREEN="\033[42;37m"
 ICON_OK="✅"; ICON_ERR="❌"; ICON_WARN="⚠️"; ICON_WAIT="⏳"
 
@@ -38,7 +39,7 @@ print_banner() {
     echo -e "${BLUE}           |   _   ||   |  | ||   _   |  |   |              ${PLAIN}"
     echo -e "${BLUE}           |__| |__||___|  |_||__| |__|  |___|              ${PLAIN}"
     echo -e "${BLUE}============================================================${PLAIN}"
-    echo -e "${YELLOW}                     Xray-Auto v0.4                       ${PLAIN}"
+    echo -e "${YELLOW}${BOLD}                      Xray-Auto v0.4               ${PLAIN}"
     echo -e "${BLUE}============================================================${PLAIN}\n"
 }
 
@@ -115,7 +116,7 @@ if wait_with_countdown 9 "确认 xhttp 端口 [${DEF_X}]"; then PORT_XHTTP=$DEF_
 
 
 clear
-echo -e "${BLUE}🚀 开始全自动化部署...${PLAIN}"
+echo -e "${YELLOW}${BOLD}🚀 开始全自动化部署...${PLAIN}"
 
 # --- 1. 系统初始化 ---
 timedatectl set-timezone Asia/Shanghai
@@ -149,10 +150,10 @@ echo -e "\n${RED}❌ 严重错误：软件安装失败。可能是网络源问�
 fi
 
 # 安装 Xray
-echo -e "${GREEN}   🚀 下载并安装 Xray Core...${PLAIN}"
+echo -e "${BLUE}   🚀 下载并安装 Xray Core...${PLAIN}"
 bash -c "$(curl -L $CURL_OPT https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
-echo -e "${GREEN} Xray 安装完成${PLAIN}"
+echo -e "${GREEN} Xray Core 安装完成${PLAIN}"
 
 mkdir -p /usr/local/share/xray/
 wget -q $CURL_OPT -O /usr/local/share/xray/geoip.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
@@ -194,7 +195,7 @@ systemctl restart rsyslog || echo "Rsyslog restart skipped"
 systemctl enable fail2ban >/dev/null 2>&1
 systemctl restart fail2ban
 
-echo -ne "${GREEN}   🛠️  执行内核调优 (BBR + Swap)...${PLAIN}"
+echo -ne "${BLUE}   🛠️  执行内核调优 (BBR + Swap)...${PLAIN}"
 set_sysctl "net.core.default_qdisc" "fq"
 set_sysctl "net.ipv4.tcp_congestion_control" "bbr"
 sysctl -p >/dev/null 2>&1
@@ -203,7 +204,7 @@ if [ "$(free -m | grep Mem | awk '{print $2}')" -lt 2048 ] && [ "$(swapon --show
     chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile >/dev/null
     grep -q "/swapfile" /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
-echo -e "${GREEN} 完成${PLAIN}"
+echo -e "${GREEN} 完成 ${PLAIN}"
 
 # --- 3. 智能 SNI 优选 ---
 echo -e "\n${BLUE}--- 🔍 智能 SNI 伪装域优选 ---${PLAIN}"
@@ -227,7 +228,7 @@ DEFAULT_SNI=${DOMAINS[$((BEST_INDEX-1))]}
 echo -e "----------------------------------------------"
 if wait_with_countdown 9 "优选 SNI [${DEFAULT_SNI}]"; then SNI_HOST="$DEFAULT_SNI"; else
     read -p "   请输入自定义 SNI: " SNI_IN; SNI_HOST="${SNI_IN:-$DEFAULT_SNI}"; fi
-echo -e "   ✅ 已选: ${GREEN}${SNI_HOST}${PLAIN}"
+echo -e "   ✅ 已选: ${YELLOW}${SNI_HOST}${PLAIN}"
 
 # --- 生成配置 ---
 XRAY_BIN="/usr/local/bin/xray"
@@ -244,7 +245,7 @@ XHTTP_PATH="/$(openssl rand -hex 4)"
 
 # 3. 验证变量是否生成成功
 if [[ -z "$UUID" || -z "$PRIVATE_KEY" || -z "$PUBLIC_KEY" ]]; then
-    echo -e "\033[31m❌ 错误：凭证生成不完整，请检查 Xray 是否安装成功。\033[0m"
+    echo -e "\${RED}❌ 错误：凭证生成不完整，请检查 Xray 是否安装成功。${PLAIN}"
     exit 1
 fi
 
@@ -309,8 +310,8 @@ cat >> /usr/local/bin/info << 'SCRIPT_EOF'
 # --- 动态获取 IP ---
 IPV4=$(curl -s4m 2 https://api.ipify.org || curl -s4m 2 https://ifconfig.me)
 IPV6=$(curl -s6m 2 https://api64.ipify.org || curl -s6m 2 https://ifconfig.co)
-[ -z "$IPV4" ] && IPV4="无 IPv4 地址"
-[ -z "$IPV6" ] && IPV6="无 IPv6 地址"
+[ -z "$IPV4" ] && IPV4="N/A"
+[ -z "$IPV6" ] && IPV6="N/A"
 if [[ "$IPV4" != "无 IPv4 地址" ]]; then SHOW_IP=$IPV4; else SHOW_IP="[$IPV6]"; fi
 
 # --- 生成链接 ---
@@ -323,19 +324,19 @@ LINK_XHTTP="vless://${UUID}@${SHOW_IP}:${PORT_XHTTP}?security=reality&encryption
 # --- 输出显示 ---
 clear
 echo -e "=========================================================="
-echo -e "${YELLOW}🚀 Xray 配置详情 ${PLAIN}"
+echo -e "${BLUE}🚀 Xray 配置详情 ${PLAIN}"
 echo -e "=========================================================="
-echo -e "  服务器名     : ${GREEN}${HOST_NAME}${PLAIN}"
+echo -e "  服务器名     : ${HOST_NAME}"
 echo -e "  IPv4 地址    : ${GREEN}${IPV4}${PLAIN}"
-echo -e "  IPv6 地址    : ${GREEN}${IPV6}${PLAIN}"
-echo -e "  伪装域SNI    : ${GREEN}${SNI_HOST}${PLAIN}"
-echo -e "  UUID         : ${BLUE}${UUID}${PLAIN}"
-echo -e "  Short ID     : ${BLUE}${SHORT_ID}${PLAIN}"
-echo -e "  Public Key   : ${BLUE}${PUBLIC_KEY}${PLAIN}"
+echo -e "  IPv6 地址    : ${BLUE}${IPV6}${PLAIN}"
+echo -e "  伪装域SNI    : ${YELLOW}${SNI_HOST}${PLAIN}"
+echo -e "  UUID         : ${GREEN}${UUID}${PLAIN}"
+echo -e "  Short ID     : ${GREEN}${SHORT_ID}${PLAIN}"
+echo -e "  Public Key   : ${GREEN}${PUBLIC_KEY}${PLAIN}"
 echo -e "  Private Key  : ${RED}${PRIVATE_KEY}${PLAIN} (服务端用)"
 echo -e "----------------------------------------------------------"
-echo -e "  ${YELLOW}节点 1 (Vision)${PLAIN}  端口: ${GREEN}${PORT_VISION}${PLAIN}    流控: ${GREEN}xtls-rprx-vision${PLAIN}"
-echo -e "  ${YELLOW}节点 2 (xhttp) ${PLAIN}  端口: ${GREEN}${PORT_XHTTP}${PLAIN}   协议: ${GREEN}xhttp${PLAIN}   路径: ${GREEN}${XHTTP_PATH}${PLAIN}"
+echo -e "  节点 1 (Vision)  端口: ${GREEN}${PORT_VISION}${PLAIN}    流控: ${GREEN}xtls-rprx-vision${PLAIN}"
+echo -e "  节点 2 (xhttp)   端口: ${GREEN}${PORT_XHTTP}${PLAIN}   协议: ${GREEN}xhttp${PLAIN}   路径: ${GREEN}${XHTTP_PATH}${PLAIN}"
 echo -e "----------------------------------------------------------"
 echo -e "${YELLOW}👇 节点 1 (Vision) 链接:${PLAIN}"
 echo -e "${LINK_VISION}"
@@ -370,12 +371,12 @@ else
     OPT_2="${RED}2. 允许国内流量 (Allow CN) [⚠️ 当前]${PLAIN}"
 fi
 clear
-echo -e "${BLUE}============================================${PLAIN}"
-echo -e "${YELLOW}       Xray 路由模式切换 (Mode Switch)${PLAIN}"
-echo -e "${BLUE}============================================${PLAIN}"
+echo -e "============================================"
+echo -e "${BLUE}       Xray 路由模式切换 (Mode Switch)${PLAIN}"
+echo -e "==========================================="
 echo -e "$OPT_1"
 echo -e "$OPT_2"
-echo -e "${BLUE}--------------------------------------------${PLAIN}"
+echo -e "-------------------------------------------"
 read -p "请输入选项 [1-2] (其他键退出): " choice
 case "$choice" in
     1) cp "$BLOCK_CFG" "$CONFIG"; systemctl restart xray; echo -e "\n${GREEN}✅ 已切换为: 阻断国内流量${PLAIN}";;
