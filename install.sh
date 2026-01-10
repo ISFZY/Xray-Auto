@@ -281,9 +281,19 @@ echo -e "----------------------------------------------"
 
 DEFAULT_SNI=${DOMAINS[$((BEST_INDEX-1))]}
 
-echo -ne "${GREEN}👉 请选择 SNI ID [0-6] ${PLAIN}(默认: ${YELLOW}${BEST_INDEX}. ${DEFAULT_SNI}${PLAIN}): "
-read -t 10 -p "" SELECTION || SELECTION=""
-echo "" # 换行
+SELECTION=""
+for ((i=10; i>0; i--)); do
+
+    echo -ne "\r${GREEN}👉 请选择 SNI ID [0-6] ${PLAIN}(默认: ${YELLOW}${BEST_INDEX}. ${DEFAULT_SNI}${PLAIN}) [${YELLOW}${i}s${PLAIN}]: "
+    
+    read -t 1 -n 1 input_char
+    
+    if [ $? -eq 0 ]; then
+        SELECTION="$input_char"
+        echo ""
+        break
+    fi
+done
 
 if [[ -z "$SELECTION" ]]; then
     SNI_HOST="$DEFAULT_SNI"
