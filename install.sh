@@ -32,7 +32,7 @@ print_banner() {
     echo -e "${BLUE}           |  |_|  ||    _ |  |   _   ||  | |  |            ${PLAIN}"
     echo -e "${BLUE}           |       ||   | ||  |  |_|  ||  |_|  |            ${PLAIN}"
     echo -e "${BLUE}           |       ||   |_||_ |       ||       |            ${PLAIN}"
-    echo -e "${BLUE}           |     | |    __  ||       ||_     _|             ${PLAIN}"
+    echo -e "${BLUE}           |     | |    __  ||        ||_     _|             ${PLAIN}"
     echo -e "${BLUE}           |   _   ||   |  | ||   _   |  |   |              ${PLAIN}"
     echo -e "${BLUE}           |__| |__||___|  |_||__| |__|  |___|  By ISFZY    ${PLAIN}"
     echo -e "${BLUE}============================================================${PLAIN}"
