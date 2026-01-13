@@ -21,16 +21,17 @@ INFO="${BLUE}[INFO]${PLAIN}"
 STEP="${PURPLE}==>${PLAIN}"
 
 # 1.3 简单的旋转动画
-# Linux 最标准的等待动画： | / - \
+# Linux 等待动画： | / - \
 UI_SPINNER_FRAMES=("|" "/" "-" "\\")
-UI_LOG_WIDTH=25
+# 截取日志长度
+UI_LOG_WIDTH=50
 
 # 1.4 锁文件配置 (Prevent Duplicate Run)
 LOCK_DIR="/tmp/xray_installer_lock"
 PID_FILE="$LOCK_DIR/pid"
 
 # 1.5 交互超时设置 (Interaction Timeouts)
-UI_TIMEOUT_SHORT=20   # 简单询问 (如: BBR, 时区)
+UI_TIMEOUT_SHORT=30   # 简单询问 (如: BBR, 时区)
 UI_TIMEOUT_LONG=30    # 复杂操作 (如: 端口, 选域名)
 
 # ------------------------------------------------------------------
@@ -109,7 +110,7 @@ read_with_timeout() {
     USER_INPUT="$default"
 }
 
-# --- 核心：旋转光标监控 (Standard Spinner) ---
+# --- 核心：旋转光标监控 (Standard Spinner) [修复版] ---
 monitor_task_inline() {
     local pid=$1
     local logfile=$2
@@ -121,15 +122,22 @@ monitor_task_inline() {
     
     while kill -0 $pid 2>/dev/null; do
         # 获取日志摘要
-        local raw_log=$(tail -n 1 "$logfile" 2>/dev/null)
-        local clean_log=$(echo "$raw_log" | sed 's/\x1b\[[0-9;]*m//g' | cut -c 1-$UI_LOG_WIDTH)
+        if [ -f "$logfile" ]; then
+            local raw_log=$(tail -n 1 "$logfile" 2>/dev/null)
+            # 1. 去除颜色代码
+            # 2. 去除 \r 回车符 (关键修复)
+            # 3. 截取前 UI_LOG_WIDTH 个字符 (您设置的100)
+            local clean_log=$(echo "$raw_log" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r' | cut -c 1-$UI_LOG_WIDTH)
+        else
+            local clean_log=""
+        fi
+
         if [ -z "$clean_log" ]; then clean_log="..."; fi
         
         i=$(( (i+1) % ${#UI_SPINNER_FRAMES[@]} ))
         
-        # 样式： [旋转符] 描述... (日志)
-        # 例如： [ / ] 安装 Xray Core... (Downloading)
-        printf "\r ${BLUE}[ %s ]${PLAIN} %-35s ${GRAY}(%s)${PLAIN}" \
+        # 打印状态
+        printf "\r ${BLUE}[ %s ]${PLAIN} %-35s ${GRAY}(%s)${PLAIN}\033[K" \
             "${UI_SPINNER_FRAMES[$i]}" "$desc" "$clean_log"
             
         sleep 0.1
@@ -227,14 +235,14 @@ pre_flight_check() {
         while is_package_manager_running; do
             if [ $ticks -ge $max_ticks ]; then
                 tput cnorm
-                echo -e "\n${WARN} 等待超时！可选择手动杀进程或继续等待。"
+                echo -e "\n${WARN} 等待超时！用户可选择手动杀进程或继续等待。"
                 read -p "是否强制终止占用进程? (y/n) [n]: " kill_choice
                 if [[ "$kill_choice" == "y" ]]; then
                     killall apt apt-get 2>/dev/null
                     rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock*
                     break
                 else
-                    echo -e "${ERR} 取消，安装终止。"; exit 1
+                    echo -e "${ERR} 用户取消，安装终止。"; exit 1
                 fi
             fi
             
@@ -320,16 +328,15 @@ execute_task "$CMD_UPDATE"  "刷新软件源"
 execute_task "$CMD_UPGRADE" "系统升级 (可能较慢)"
 
 # 依赖安装
-DEPENDENCIES=("curl" "tar" "unzip" "fail2ban" "rsyslog" "chrony" "iptables" "iptables-persistent" "qrencode" "jq" "cron")
+DEPENDENCIES=("curl" "tar" "unzip" "fail2ban" "rsyslog" "chrony" "iptables" "iptables-persistent" "qrencode" "jq" "cron" "python3-systemd")
 for pkg in "${DEPENDENCIES[@]}"; do
     execute_task "apt-get install -y $pkg" "安装依赖: $pkg"
 done
 
 # 安装 Xray
 mkdir -p /usr/local/share/xray/
-CMD_XRAY='bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --without-geodata'
-execute_task "$CMD_XRAY" "安装 Xray Core"
-
+CMD_XRAY='bash -c "$(curl -L '$CURL_OPT' https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --without-geodata'
+echo -e ""
 echo -e "${OK}   基础组件安装完毕。\n"
 
 # --- 下载 Geo 数据并配置自动更新 ---
@@ -454,11 +461,13 @@ bantime.factor = 1
 bantime.maxtime = 30d
 findtime = 1d
 maxretry = 3
-backend = systemd
+# 改为 auto，让它自动兼容日志文件和systemd，防止崩溃
+backend = auto
 
 [sshd]
 enabled = true
 port = $SSH_PORT,22
+# 如果 aggressive 模式导致无法启动，可改为 normal
 mode = aggressive
 EOF
     execute_task "systemctl restart rsyslog && systemctl enable fail2ban && systemctl restart fail2ban" "配置 Fail2ban 防护(开启指数封禁)"
@@ -534,7 +543,7 @@ echo -ne "\r\033[K"
 SORTED_DOMAINS=() 
 index=1
 echo -e "   结果清单:"
-echo -e "   0. 自定义域名 (Custom Input)"
+echo -e "   0 . 自定义域名 (Custom Input)"
 
 while read ms domain; do
     SORTED_DOMAINS+=("$domain")
@@ -572,13 +581,36 @@ fi
 echo -e "${OK}   已选伪装域: ${GREEN}${SNI_HOST}${PLAIN}\n"
 
 # --- 生成最终配置 ---
+# 1. 强制创建配置目录 (防止目录不存在导致写入失败)
+mkdir -p /usr/local/etc/xray
+
 XRAY_BIN="/usr/local/bin/xray"
+
+# 2. 核心文件熔断检查 (防止核心没装好就生成空配置)
+if [ ! -f "$XRAY_BIN" ]; then
+    echo -e "${RED}==========================================================${PLAIN}"
+    echo -e "${RED} [FATAL] 严重错误：Xray 核心文件未安装成功！               ${PLAIN}"
+    echo -e "${RED}==========================================================${PLAIN}"
+    echo -e "原因分析："
+    echo -e "1. GitHub 连接超时，导致安装脚本下载失败。"
+    echo -e "2. 纯 IPv6 机器未正确通过代理连接 GitHub。"
+    echo -e ""
+    echo -e "${YELLOW}建议：请检查服务器网络，或重新运行脚本。${PLAIN}"
+    exit 1
+fi
+
 UUID=$($XRAY_BIN uuid)
 KEYS=$($XRAY_BIN x25519)
 PRIVATE_KEY=$(echo "$KEYS" | grep "Private" | awk '{print $NF}')
 PUBLIC_KEY=$(echo "$KEYS" | grep -E "Public|Password" | awk '{print $NF}')
 SHORT_ID=$(openssl rand -hex 8)
 XHTTP_PATH="/$(openssl rand -hex 4)"
+
+# 3. 密钥生成失败检查
+if [ -z "$UUID" ] || [ -z "$PRIVATE_KEY" ]; then
+    echo -e "${ERR} 密钥生成失败，无法写入配置！"
+    exit 1
+fi
 
 # 写入 Config
 cat > /usr/local/etc/xray/config.json <<EOF
@@ -612,7 +644,7 @@ echo -e "[Service]\nLimitNOFILE=infinity\nLimitNPROC=infinity\nTasksMax=infinity
 # 四、脚本管理区 (Script Management Area)
 # ==================================================================
 
-# --- 1. Info 脚本 ---
+# --- 1. 生成 Info 脚本 ---
 cat > /usr/local/bin/info << 'EOF'
 #!/bin/bash
 RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; BLUE="\033[36m"; PLAIN="\033[0m"
@@ -716,14 +748,14 @@ fi
 
 # 底部常用命令提示
 echo -e "\n------------------------------------------------------------------"
-echo -e " 常用工具: ${YELLOW}info${PLAIN}  (查看链接) | ${YELLOW}net${PLAIN} (网络偏好)"
-echo -e " 运维命令: ${YELLOW}ports${PLAIN} (端口信息) | ${YELLOW}journalctl -u xray -f${PLAIN} (实时日志)"
+echo -e " 常用工具: ${YELLOW}info${PLAIN}  (信息) | ${YELLOW}net${PLAIN} (网络)"
+echo -e " 运维命令: ${YELLOW}ports${PLAIN} (端口) | ${YELLOW}f2b${PLAIN} (防火墙) | ${YELLOW}journalctl -u xray -f${PLAIN} (日志)"
 echo -e "------------------------------------------------------------------"
 echo ""
 EOF
 chmod +x /usr/local/bin/info
 
-# --- 2. Net 脚本 ---
+# --- 2. 生成 Net 脚本 (交互面板版) ---
 cat > /usr/local/bin/net << 'EOF'
 #!/bin/bash
 RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; BLUE="\033[36m"; PLAIN="\033[0m"
@@ -837,7 +869,7 @@ done
 EOF
 chmod +x /usr/local/bin/net
 
-# --- 3. Ports 脚本 ---
+# --- 3. 生成 Ports 脚本 (带SSH安全警示) ---
 cat > /usr/local/bin/ports << 'EOF'
 #!/bin/bash
 RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; BLUE="\033[36m"; GRAY="\033[90m"; PLAIN="\033[0m"
@@ -993,6 +1025,228 @@ while true; do
 done
 EOF
 chmod +x /usr/local/bin/ports
+
+# --- 4. 生成 Fail2ban 管理脚本 (f2b) - 完美版 ---
+cat > /usr/local/bin/f2b << 'EOF'
+#!/bin/bash
+RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; BLUE="\033[36m"; GRAY="\033[90m"; PLAIN="\033[0m"
+
+JAIL_FILE="/etc/fail2ban/jail.local"
+
+# 0. 启动即清屏
+clear
+
+if [ "$EUID" -ne 0 ]; then echo -e "${RED}请使用 sudo 运行此脚本！${PLAIN}"; exit 1; fi
+
+# --- 核心辅助函数 ---
+
+get_conf() {
+    local key=$1
+    # 提取 value
+    grep "^${key}\s*=" "$JAIL_FILE" | awk -F'=' '{print $2}' | tr -d ' '
+}
+
+set_conf() {
+    local key=$1; local val=$2
+    if grep -q "^${key}\s*=" "$JAIL_FILE"; then
+        sed -i "s/^${key}\s*=.*/${key} = ${val}/" "$JAIL_FILE"
+    else
+        sed -i "2i ${key} = ${val}" "$JAIL_FILE"
+    fi
+}
+
+restart_f2b() {
+    echo -e "${INFO} 正在重载配置..."
+    systemctl restart fail2ban
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}配置已生效！${PLAIN}"
+    else
+        echo -e "${RED}Fail2ban 重启失败，请检查配置！${PLAIN}"
+    fi
+    read -n 1 -s -r -p "按任意键继续..."
+}
+
+get_status() {
+    if systemctl is-active fail2ban >/dev/null 2>&1; then
+        local count=$(fail2ban-client status sshd 2>/dev/null | grep "Currently banned" | grep -o "[0-9]*")
+        echo -e "${GREEN}运行中 (Active)${PLAIN} | 当前封禁: ${RED}${count:-0}${PLAIN} IP"
+    else
+        echo -e "${RED}已停止 (Stopped)${PLAIN}"
+    fi
+}
+
+# --- 校验函数 ---
+
+# 校验时间格式 (支持纯数字 或 10s/10m/10h/10d/1w)
+validate_time() {
+    local input=$1
+    if [[ "$input" =~ ^[0-9]+[smhdw]?$ ]]; then return 0; else return 1; fi
+}
+
+# 校验纯数字
+validate_int() {
+    local input=$1
+    if [[ "$input" =~ ^[0-9]+$ ]]; then return 0; else return 1; fi
+}
+
+# --- 功能模块 ---
+
+change_param() {
+    local name=$1; local key=$2; local type=$3 # time or int
+    local current=$(get_conf "$key")
+    
+    echo -e "\n${BLUE}正在修改: ${name}${PLAIN}"
+    echo -e "当前值: ${GREEN}${current}${PLAIN}"
+    if [ "$type" == "time" ]; then
+        echo -e "${GRAY}(格式说明: 纯数字=秒, 或加单位 s/m/h/d. 例: 30m, 1h, 7d)${PLAIN}"
+    else
+        echo -e "${GRAY}(格式说明: 仅允许输入纯数字)${PLAIN}"
+    fi
+
+    while true; do
+        read -p "请输入新值 (留空取消): " new_val
+        if [ -z "$new_val" ]; then echo "取消修改。"; read -n 1 -s -r; return; fi
+
+        # 执行校验
+        if [ "$type" == "time" ]; then
+            validate_time "$new_val" && break
+            echo -e "${RED}错误: 格式不正确！请使用如 600, 1h, 1d 等格式。${PLAIN}"
+        elif [ "$type" == "int" ]; then
+            validate_int "$new_val" && break
+            echo -e "${RED}错误: 必须输入纯数字！${PLAIN}"
+        fi
+    done
+    
+    set_conf "$key" "$new_val"
+    restart_f2b
+}
+
+toggle_service() {
+    echo -e "\n${BLUE}--- 服务开关 ---${PLAIN}"
+    if systemctl is-active fail2ban >/dev/null 2>&1; then
+        echo -e "当前状态: ${GREEN}运行中${PLAIN}"
+        read -p "是否停止并禁用 Fail2ban? (y/n): " confirm
+        if [[ "$confirm" == "y" ]]; then
+            systemctl stop fail2ban
+            systemctl disable fail2ban
+            echo -e "${RED}服务已停止。${PLAIN}"
+        fi
+    else
+        echo -e "当前状态: ${RED}已停止${PLAIN}"
+        read -p "是否启用并启动 Fail2ban? (y/n): " confirm
+        if [[ "$confirm" == "y" ]]; then
+            systemctl enable fail2ban
+            systemctl start fail2ban
+            echo -e "${GREEN}服务已启动。${PLAIN}"
+        fi
+    fi
+    read -n 1 -s -r -p "按任意键继续..."
+}
+
+unban_ip() {
+    echo -e "\n${BLUE}--- 手动解封 IP ---${PLAIN}"
+    read -p "请输入 IP: " target_ip
+    [ -z "$target_ip" ] && return
+    # 简单校验 IP 格式 (包含点和数字)
+    if [[ ! "$target_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo -e "${RED}IP 格式看似不正确，跳过。${PLAIN}"; sleep 1; return
+    fi
+    fail2ban-client set sshd unbanip "$target_ip"
+    echo -e "${GREEN}指令已发送。${PLAIN}"
+    read -n 1 -s -r -p "按任意键继续..."
+}
+
+add_whitelist() {
+    echo -e "\n${BLUE}--- 添加白名单 ---${PLAIN}"
+    read -p "输入 IP (回车自动添加当前IP): " input_ip
+    if [ -z "$input_ip" ]; then
+        input_ip=$(echo $SSH_CLIENT | awk '{print $1}')
+    fi
+    if [ -z "$input_ip" ]; then echo "无法获取 IP"; sleep 1; return; fi
+    
+    local old_line=$(grep "^ignoreip" "$JAIL_FILE")
+    if echo "$old_line" | grep -q "$input_ip"; then
+        echo -e "${YELLOW}已存在于白名单。${PLAIN}"; sleep 1; return
+    fi
+    
+    sed -i "/^ignoreip/ s/$/ ${input_ip}/" "$JAIL_FILE"
+    restart_f2b
+}
+
+view_logs() {
+    clear; echo -e "${BLUE}=== 封禁日志 (最近20条) ===${PLAIN}"
+    grep "Ban" /var/log/fail2ban.log 2>/dev/null | tail -n 20 || echo "暂无日志"
+    read -n 1 -s -r -p "按任意键退出..."
+}
+
+menu_exponential() {
+    while true; do
+        clear
+        local inc=$(get_conf "bantime.increment")
+        local fac=$(get_conf "bantime.factor")
+        local max=$(get_conf "bantime.maxtime")
+        
+        [ "$inc" == "true" ] && S_INC="${GREEN}ON${PLAIN}" || S_INC="${RED}OFF${PLAIN}"
+
+        echo -e "${BLUE}=== 指数封禁设置 (Recidivism) ===${PLAIN}"
+        echo -e "  1. 递增模式开关   [${S_INC}]"
+        echo -e "  2. 修改增长系数   [${YELLOW}${fac}${PLAIN}] (Factor)"
+        echo -e "  3. 修改封禁上限   [${YELLOW}${max}${PLAIN}] (MaxTime)"
+        echo -e "---------------------------------"
+        echo -e "  0. 返回"
+        echo -e ""
+        read -p "请选择: " sc
+        case "$sc" in
+            1) 
+                [ "$inc" == "true" ] && ns="false" || ns="true"
+                set_conf "bantime.increment" "$ns"; restart_f2b ;;
+            2) change_param "增长系数" "bantime.factor" "int" ;;
+            3) change_param "封禁上限" "bantime.maxtime" "time" ;;
+            0) return ;;
+        esac
+    done
+}
+
+# --- 主循环 ---
+
+while true; do
+    clear
+    VAL_MAX=$(get_conf "maxretry"); VAL_BAN=$(get_conf "bantime"); VAL_FIND=$(get_conf "findtime")
+    
+    echo -e "${BLUE}===================================================${PLAIN}"
+    echo -e "${BLUE}         Fail2ban 防火墙管理 (F2B Panel)           ${PLAIN}"
+    echo -e "${BLUE}===================================================${PLAIN}"
+    echo -e "  状态: $(get_status)"
+    echo -e "---------------------------------------------------"
+    echo -e "  1. 修改 最大重试次数 [${YELLOW}${VAL_MAX}${PLAIN}]  (MaxRetry)"
+    echo -e "  2. 修改 初始封禁时长 [${YELLOW}${VAL_BAN}${PLAIN}] (BanTime)"
+    echo -e "  3. 修改 监测时间窗口 [${YELLOW}${VAL_FIND}${PLAIN}] (FindTime)"
+    echo -e "---------------------------------------------------"
+    echo -e "  4. ${GREEN}手动解封 IP${PLAIN}  (Unban)"
+    echo -e "  5. ${GREEN}添加白名单${PLAIN}   (Whitelist)"
+    echo -e "  6. 查看封禁日志 (Logs)"
+    echo -e "  7. ${YELLOW}指数封禁设置${PLAIN} (Advanced) ->"
+    echo -e "---------------------------------------------------"
+    echo -e "  8. 开启/停止 Fail2ban 服务 (On/Off)"
+    echo -e "  0. 退出"
+    echo -e ""
+    read -p "请输入选项 [0-8]: " choice
+
+    case "$choice" in
+        1) change_param "最大重试次数" "maxretry" "int" ;;
+        2) change_param "初始封禁时长" "bantime"  "time" ;;
+        3) change_param "监测时间窗口" "findtime" "time" ;;
+        4) unban_ip ;;
+        5) add_whitelist ;;
+        6) view_logs ;;
+        7) menu_exponential ;;
+        8) toggle_service ;;
+        0) clear; exit 0 ;;
+        *) ;;
+    esac
+done
+EOF
+chmod +x /usr/local/bin/f2b
 
 # ==================================================================
 # 五、服务启动与收尾 (Service Start & Finalize)
