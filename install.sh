@@ -314,47 +314,123 @@ check_timezone
 echo -e "\n${STEP} 开始安装核心组件..."
 
 export DEBIAN_FRONTEND=noninteractive
-
-# 抑制弹窗
 mkdir -p /etc/needrestart/conf.d
 echo "\$nrconf{restart} = 'a';" > /etc/needrestart/conf.d/99-xray-auto.conf
 
-# 基础更新
-CMD_UPDATE='apt-get update -qq'
-CMD_UPGRADE='DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" upgrade'
+# === 1. 系统级更新 ===
+# 修复潜在的包管理锁问题
+rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock*
+execute_task "apt-get update -qq"  "刷新软件源"
+execute_task "DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' upgrade" "系统升级"
 
-execute_task "$CMD_UPDATE"  "刷新软件源"
-execute_task "$CMD_UPGRADE" "系统升级 (可能较慢)"
-
-# 依赖安装
+# === 2. 依赖安装 (安装后立即验证) ===
 DEPENDENCIES=("curl" "tar" "unzip" "fail2ban" "rsyslog" "chrony" "iptables" "iptables-persistent" "qrencode" "jq" "cron" "python3-systemd")
+
+echo -e "${INFO} 正在检查并安装依赖..."
 for pkg in "${DEPENDENCIES[@]}"; do
+    # 预检查：如果 dpkg 数据库里已经有了，就不浪费时间apt了
+    if dpkg -s "$pkg" &>/dev/null; then
+        echo -e "${OK}   依赖已就绪: $pkg"
+        continue
+    fi
+
+    # 初次安装
     execute_task "apt-get install -y $pkg" "安装依赖: $pkg"
+    
+    # [关键步骤] 安装后验证：apt 虽然返回0，但可能包坏了
+    if ! dpkg -s "$pkg" &>/dev/null; then
+        echo -e "${WARN} 依赖 $pkg 校验失败！尝试修复源并重试..."
+        apt-get update -qq --fix-missing
+        execute_task "apt-get install -y $pkg" "重试安装: $pkg"
+        
+        # 熔断机制：二次重试还不行，直接报错退出
+        if ! dpkg -s "$pkg" &>/dev/null; then
+            echo -e "${ERR} [FATAL] 无法安装系统依赖: $pkg"
+            echo -e "${YELLOW}请手动运行 'apt-get install $pkg' 查看具体报错。${PLAIN}"
+            exit 1
+        fi
+    fi
 done
 
-# 安装 Xray
-mkdir -p /usr/local/share/xray/
-CMD_XRAY='bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --without-geodata'
-execute_task "$CMD_XRAY" "安装 Xray Core"
+# === 3. Xray 核心安装 (二进制验证 + 循环重试) ===
+install_xray_robust() {
+    local max_tries=3
+    local count=0
+    local bin_path="/usr/local/bin/xray"
+    
+    mkdir -p /usr/local/share/xray/
 
-echo -e "${OK}   基础组件安装完毕。\n"
+    while [ $count -lt $max_tries ]; do
+        # 执行官方安装脚本
+        CMD_XRAY='bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --without-geodata'
+        
+        if [ $count -gt 0 ]; then
+            desc="安装 Xray Core (第 $((count+1)) 次尝试)"
+        else
+            desc="安装 Xray Core"
+        fi
+        execute_task "$CMD_XRAY" "$desc"
+        
+        # [关键步骤] 验证：不仅检查文件存在，还要试运行一次看版本
+        if [ -f "$bin_path" ] && "$bin_path" version &>/dev/null; then
+            local ver=$("$bin_path" version | head -n 1 | awk '{print $2}')
+            echo -e "${OK}   Xray 核心校验通过: ${GREEN}${ver}${PLAIN}"
+            return 0
+        fi
+        
+        echo -e "${WARN} Xray 安装校验失败 (文件损坏或无法运行)，清理环境重试..."
+        # 删除可能损坏的二进制文件
+        rm -rf "$bin_path" "/usr/local/share/xray/"
+        ((count++))
+        sleep 2
+    done
+    
+    echo -e "${ERR} [FATAL] Xray Core 安装最终失败！"
+    echo -e "${YELLOW}可能原因：GitHub 连接被墙或网络极不稳定。${PLAIN}"
+    exit 1
+}
 
-# --- 下载 Geo 数据并配置自动更新 ---
-echo -e "\n${BLUE}--- 1. 下载 Geo 数据并配置自动更新 ---${PLAIN}"
-GEO_URL="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
-CMD_GEOIP="curl -L $CURL_OPT -o /usr/local/share/xray/geoip.dat $GEO_URL"
+install_xray_robust
 
-# 执行初次下载
-execute_task "$CMD_GEOIP" "下载 GeoIP 库"
+# === 4. GeoIP 数据库下载 (校验 + 自动更新) ===
+install_geoip_robust() {
+    local file="/usr/local/share/xray/geoip.dat"
+    local url="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
+    
+    # --- 1. 下载 ---
+    execute_task "curl -L $CURL_OPT -o $file $url" "下载 GeoIP 规则库"
+    
+    # --- 2. 校验 (验证文件是否存在且大小正常) ---
+    local fsize=$(du -k "$file" 2>/dev/null | awk '{print $1}')
+    if [ ! -f "$file" ] || [ "$fsize" -lt 500 ]; then
+        echo -e "${WARN} GeoIP 文件似乎不完整 (Size: ${fsize}KB)，正在重试下载..."
+        rm -f "$file"
+        execute_task "curl -L $CURL_OPT -o $file $url" "重试下载 GeoIP"
+        
+        # 二次检查
+        if [ ! -f "$file" ]; then
+            echo -e "${WARN} GeoIP 下载失败，将跳过 (不影响核心功能)。"
+            return 1
+        fi
+    fi
 
-# 定义更新命令 (下载 + 重启 xray)
-UPDATE_CMD="curl -L $CURL_OPT -o /usr/local/share/xray/geoip.dat $GEO_URL && systemctl restart xray"
-CRON_JOB="0 4 * * 0 $UPDATE_CMD >/dev/null 2>&1"
+    # --- 3. 配置自动更新 (Crontab) ---
+    # 定义更新命令
+    local update_cmd="curl -L $CURL_OPT -o $file $url && systemctl restart xray"
+    local cron_job="0 4 * * 0 $update_cmd >/dev/null 2>&1"
 
-# 写入 Crontab (先清理旧的 geoip 任务，再添加新的)
-(crontab -l 2>/dev/null | grep -v 'geoip.dat'; echo "$CRON_JOB") | crontab -
+    # 确保 cron 已安装
+    if ! command -v crontab &>/dev/null; then apt-get install -y cron &>/dev/null; fi
+    
+    # 写入任务 (先删旧的，再加新的)
+    (crontab -l 2>/dev/null | grep -v 'geoip.dat'; echo "$cron_job") | crontab -
+    
+    echo -e "${OK}   geoip 自动更新任务 (每周日 4:00)"
+}
 
-echo -e "${OK}   已添加自动更新任务 (每周日 4:00)"
+install_geoip_robust
+
+echo -e "${OK}   基础组件安装完毕 (已通过完整性自检)。\n"
 
 # --- 3. 安全与防火墙配置 ---
 
