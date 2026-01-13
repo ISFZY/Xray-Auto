@@ -57,6 +57,7 @@ bash <(curl -sL https://github.com/ISFZY/Xray-Auto/raw/main/remove.sh)
 | `info` | 查询Xray配置信息 | * 查看当前的 IP、端口、UUID、伪装域名等信息。* 运行后输入 `y` 可在终端生成巨大的二维码供手机扫描。|
 | `ports` | 修改端口 | 1. SSH 2. Vision 3. xhttp |
 | `net` | 切换网络 | 1. **IPv4 优先**: 推荐, 兼容性最好。2. **IPv6 优先**: 适合 IPv6 线路优秀的机器。3. **仅 IPv4**: 强制 Xray 只用 IPv4 。4. **仅 IPv6**: 强制 Xray 只用 IPv6。 |
+| `f2b` | 修改防火墙（Fail2ban) | Fail2ban相关参数 |
 
 ### 📝 客户端配置参考
 | 参数 | 值 (示例) | 说明 |
@@ -124,7 +125,7 @@ Xray Management Commands
 | 'info' | View Xray Config Info | • View current IP, Port, UUID, Camouflage Domain, etc.• After running, type y to generate a large QR code in the terminal for scanning with a mobile phone. |
 | `ports` | change Ports | 1. SSH 2. Vision 3. xhttp |
 | 'net' | Switch Network | 1. **IPv4 Priority**: Recommended, best compatibility. 2. **IPv6 Priority**: Suitable for servers with excellent IPv6 connections.3. **IPv4 Only**: Forces Xray to use IPv4 only.4. **IPv6 Only**: Forces Xray to use IPv6 only. |
-
+| `f2b` | Setting Fail2ban) | Fail2ban |
 
 ### 📝 Client Configuration Reference
 | Parameter | Value (Example) | Note |
