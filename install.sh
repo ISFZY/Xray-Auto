@@ -1060,7 +1060,7 @@ while true; do
     echo -e "---------------------------------------------------"
     echo -e "  [双栈模式 - 系统级排序]"
     echo -e "  ${MARK_1} 1. IPv4 优先   ${GRAY}- 推荐，系统 IPv6 保持开启${PLAIN}"
-    echo -e "  ${MARK_2} 2. IPv6 优先   ${GRAY}- 系统 IPv6 保持开启${PLAIN}"
+    echo -e "  ${MARK_2} 2. IPv6 优先   ${GRAY}- 系统 IPv4 保持开启${PLAIN}"
     echo -e "---------------------------------------------------"
     echo -e "  [强制模式 - 系统级开关]"
     echo -e "  ${MARK_3} 3. 仅 IPv4     ${GRAY}- ${RED}彻底禁用系统 IPv6${GRAY} + Xray 仅 v4${PLAIN}"
