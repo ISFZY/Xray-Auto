@@ -770,24 +770,18 @@ cat > /usr/local/bin/info << 'EOF'
 #!/bin/bash
 RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; BLUE="\033[36m"; PLAIN="\033[0m"
 
-# 配置文件路径
 CONFIG_FILE="/usr/local/etc/xray/config.json"
 SSH_CONFIG="/etc/ssh/sshd_config"
 XRAY_BIN="/usr/local/bin/xray"
 
-# 检查依赖
-if ! command -v jq &> /dev/null; then
-    echo -e "${RED}Error: 缺少 jq 依赖，无法解析配置。请运行 apt install jq${PLAIN}"
-    exit 1
-fi
+if ! command -v jq &> /dev/null; then echo -e "${RED}Error: 缺少 jq 依赖。${PLAIN}"; exit 1; fi
 
 # --- 1. 基础信息提取 ---
 SSH_PORT=$(grep "^Port" "$SSH_CONFIG" | head -n 1 | awk '{print $2}')
 [ -z "$SSH_PORT" ] && SSH_PORT=22
-
 HOST_NAME=$(hostname)
 
-# 使用 jq 提取关键配置
+# 提取 Config
 UUID=$(jq -r '.inbounds[0].settings.clients[0].id' "$CONFIG_FILE")
 PRIVATE_KEY=$(jq -r '.inbounds[0].streamSettings.realitySettings.privateKey' "$CONFIG_FILE")
 SHORT_ID=$(jq -r '.inbounds[0].streamSettings.realitySettings.shortIds[0]' "$CONFIG_FILE")
@@ -796,47 +790,35 @@ PORT_VISION=$(jq -r '.inbounds[] | select(.tag=="vision_node") | .port' "$CONFIG
 PORT_XHTTP=$(jq -r '.inbounds[] | select(.tag=="xhttp_node") | .port' "$CONFIG_FILE")
 XHTTP_PATH=$(jq -r '.inbounds[] | select(.tag=="xhttp_node") | .streamSettings.xhttpSettings.path' "$CONFIG_FILE")
 
-# --- 2. 公钥反推与熔断机制 ---
-
-PUBLIC_KEY=""
-if [ -n "$PRIVATE_KEY" ] && [ "$PRIVATE_KEY" != "null" ] && [ -x "$XRAY_BIN" ]; then
-    # 1. 获取完整输出
+# 计算公钥
+if [ -n "$PRIVATE_KEY" ] && [ -x "$XRAY_BIN" ]; then
     RAW_OUTPUT=$($XRAY_BIN x25519 -i "$PRIVATE_KEY")
-    
-    # 2. 兼容性提取：
-    #    grep -iE "Public|Password": 同时匹配 Public, public, Password
-    #    head -n 1: 防止匹配多行，只取第一行
     PUBLIC_KEY=$(echo "$RAW_OUTPUT" | grep -iE "Public|Password" | head -n 1 | awk -F':' '{print $2}' | tr -d ' \r\n')
 fi
+if [ -z "$PUBLIC_KEY" ]; then echo -e "${RED}严重错误：无法计算公钥！${PLAIN}"; exit 1; fi
 
-# [熔断检查]：如果算不出公钥，说明配置已废，禁止生成链接
-if [ -z "$PUBLIC_KEY" ] || [ "$PUBLIC_KEY" == "null" ]; then
-    clear
-    echo -e "${RED}=======================================================${PLAIN}"
-    echo -e "${RED}   [FATAL] 严重错误：无法获取 Public Key (公钥)         ${PLAIN}"
-    echo -e "${RED}=======================================================${PLAIN}"
-    echo -e "原因分析："
-    echo -e "1. 配置文件中的 Private Key 可能损坏或为空。"
-    echo -e "2. Xray 核心未能正确执行 x25519 指令。"
-    echo -e ""
-    echo -e "当前提取到的私钥: ${YELLOW}${PRIVATE_KEY}${PLAIN}"
-    echo -e "Xray 原始输出参考: \n${RAW_OUTPUT}"
-    echo -e "${RED}脚本已终止，未生成无效链接。请检查 /usr/local/etc/xray/config.json${PLAIN}"
-    exit 1
-fi
+# --- 2. IP 检测与链接生成 ---
 
-# --- 3. 生成展示逻辑 ---
-
-# 获取公网 IP
 IPV4=$(curl -s4m 1 https://api.ipify.org || echo "N/A")
 IPV6=$(curl -s6m 1 https://api64.ipify.org || echo "N/A")
-if [[ "$IPV4" != "N/A" ]]; then SHOW_IP=$IPV4; else SHOW_IP="[$IPV6]"; fi
 
-# 拼接链接
-LINK_VISION="vless://${UUID}@${SHOW_IP}:${PORT_VISION}?security=reality&encryption=none&pbk=${PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${SNI_HOST}&sid=${SHORT_ID}#${HOST_NAME}_Vision"
-LINK_XHTTP="vless://${UUID}@${SHOW_IP}:${PORT_XHTTP}?security=reality&encryption=none&pbk=${PUBLIC_KEY}&headerType=none&fp=chrome&type=xhttp&path=${XHTTP_PATH}&sni=${SNI_HOST}&sid=${SHORT_ID}#${HOST_NAME}_xhttp"
+# 生成 IPv4 链接
+LINK_V4_VIS=""
+LINK_V4_XHT=""
+if [[ "$IPV4" != "N/A" ]]; then
+    LINK_V4_VIS="vless://${UUID}@${IPV4}:${PORT_VISION}?security=reality&encryption=none&pbk=${PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${SNI_HOST}&sid=${SHORT_ID}#${HOST_NAME}_Vision_v4"
+    LINK_V4_XHT="vless://${UUID}@${IPV4}:${PORT_XHTTP}?security=reality&encryption=none&pbk=${PUBLIC_KEY}&headerType=none&fp=chrome&type=xhttp&path=${XHTTP_PATH}&sni=${SNI_HOST}&sid=${SHORT_ID}#${HOST_NAME}_xhttp_v4"
+fi
 
-# 界面输出
+# 生成 IPv6 链接
+LINK_V6_VIS=""
+LINK_V6_XHT=""
+if [[ "$IPV6" != "N/A" ]]; then
+    LINK_V6_VIS="vless://${UUID}@[${IPV6}]:${PORT_VISION}?security=reality&encryption=none&pbk=${PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${SNI_HOST}&sid=${SHORT_ID}#${HOST_NAME}_Vision_v6"
+    LINK_V6_XHT="vless://${UUID}@[${IPV6}]:${PORT_XHTTP}?security=reality&encryption=none&pbk=${PUBLIC_KEY}&headerType=none&fp=chrome&type=xhttp&path=${XHTTP_PATH}&sni=${SNI_HOST}&sid=${SHORT_ID}#${HOST_NAME}_xhttp_v6"
+fi
+
+# --- 3. 界面展示 ---
 clear
 echo -e "${BLUE}===================================================================${PLAIN}"
 echo -e "${BLUE}       Xray 配置详情 (Dynamic Info)     ${PLAIN}"
@@ -850,27 +832,50 @@ echo -e "  Short ID    : ${BLUE}${SHORT_ID}${PLAIN}"
 echo -e "  Public Key  : ${YELLOW}${PUBLIC_KEY}${PLAIN} (客户端)"
 echo -e "  Private Key : ${RED}${PRIVATE_KEY}${PLAIN} (服务端)"
 echo -e "-------------------------------------------------------------------"
-echo -e "  ${YELLOW}节点 1${PLAIN} (Vision)   端口: ${GREEN}${PORT_VISION}${PLAIN}    流控: ${GREEN}xtls-rprx-vision${PLAIN}"
-echo -e "  ${YELLOW}节点 2${PLAIN} (xhttp)    端口: ${GREEN}${PORT_XHTTP}${PLAIN}   协议: ${GREEN}xhttp${PLAIN}   路径: ${GREEN}${XHTTP_PATH}${PLAIN}"
-echo -e "==================================================================="
-echo -e "${YELLOW}>> 节点 1 (Vision) 链接:${PLAIN}"
-echo -e "${LINK_VISION}\n"
-echo -e "${YELLOW}>> 节点 2 (xhttp) 链接:${PLAIN}"
-echo -e "${LINK_XHTTP}\n"
 
+# 节点名称黄色高亮，视觉更清晰
+if [[ -n "$LINK_V4_VIS" ]]; then
+    echo -e "${GREEN}>> IPv4 节点 (通用):${PLAIN}"
+    echo -e "${YELLOW}Vision${PLAIN}: ${LINK_V4_VIS}"
+    echo -e "${YELLOW}XHTTP ${PLAIN}: ${LINK_V4_XHT}"
+    echo ""
+fi
+
+if [[ -n "$LINK_V6_VIS" ]]; then
+    echo -e "${GREEN}>> IPv6 节点 (专用):${PLAIN} ${GRAY}(需支持 v6 网络)${PLAIN}"
+    echo -e "${YELLOW}Vision${PLAIN}: ${LINK_V6_VIS}"
+    echo -e "${YELLOW}XHTTP ${PLAIN}: ${LINK_V6_XHT}"
+    echo ""
+fi
+
+# 补全所有协议的二维码
 read -n 1 -p "是否生成二维码? (y/n): " CHOICE
 echo ""
 if [[ "$CHOICE" =~ ^[yY]$ ]]; then
-    echo -e "\n${BLUE}--- Vision Node ---${PLAIN}"
-    qrencode -t ANSIUTF8 "${LINK_VISION}"
-    echo -e "\n${BLUE}--- xhttp Node ---${PLAIN}"
-    qrencode -t ANSIUTF8 "${LINK_XHTTP}"
+    if [[ -n "$LINK_V4_VIS" ]]; then
+        echo -e "\n${BLUE}--- IPv4 Vision ---${PLAIN}"
+        qrencode -t ANSIUTF8 "${LINK_V4_VIS}"
+        echo -e "\n${BLUE}--- IPv4 XHTTP ---${PLAIN}"
+        qrencode -t ANSIUTF8 "${LINK_V4_XHT}"
+    fi
+    
+    # 为了防止刷屏，IPv6 二维码依然需要二次确认
+    if [[ -n "$LINK_V6_VIS" ]]; then
+        echo ""
+        read -n 1 -p "是否继续生成 IPv6 二维码? (y/n): " CHOICE_V6
+        echo ""
+        if [[ "$CHOICE_V6" =~ ^[yY]$ ]]; then
+            echo -e "\n${BLUE}--- IPv6 Vision ---${PLAIN}"
+            qrencode -t ANSIUTF8 "${LINK_V6_VIS}"
+            echo -e "\n${BLUE}--- IPv6 XHTTP ---${PLAIN}"
+            qrencode -t ANSIUTF8 "${LINK_V6_XHT}"
+        fi
+    fi
 fi
 
 echo -e "\n------------------------------------------------------------------"
-echo -e " 常用命令:"
-echo -e " ${YELLOW}info${PLAIN}  (信息) | ${YELLOW}net${PLAIN} (网络) | ${YELLOW}swap${PLAIN} (内存) | ${YELLOW}f2b${PLAIN} (防火墙)"
-echo -e " ${YELLOW}ports${PLAIN} (端口) | ${YELLOW}bbr${PLAIN} (内核) | ${YELLOW}bt${PLAIN}   (封禁) | ${YELLOW}xw${PLAIN}  (WARP分流) | ${YELLOW}journalctl -u xray -f${PLAIN} (日志)"
+echo -e " 常用工具: ${YELLOW}info${PLAIN}  (信息) | ${YELLOW}net${PLAIN} (网络) | ${YELLOW}swap${PLAIN} (内存) | ${YELLOW}f2b${PLAIN} (防火墙)"
+echo -e " 运维命令: ${YELLOW}ports${PLAIN} (端口) | ${YELLOW}bbr${PLAIN} (内核) | ${YELLOW}bt${PLAIN}   (封禁) | ${YELLOW}xw${PLAIN}  (WARP分流) | ${YELLOW}journalctl -u xray -f${PLAIN} (日志)"
 echo -e "------------------------------------------------------------------"
 echo ""
 EOF
@@ -1029,7 +1034,7 @@ get_current_status() {
                 MARK_3="${GREEN}●${PLAIN}" 
             else
                 # 否则说明是“安装后的初始混合态”
-                STATUS_TEXT="${YELLOW}仅 IPv4${PLAIN} (系统 IPv6: ${SYS_V6_STATUS} - ${RED}未对齐${PLAIN})"
+                STATUS_TEXT="${YELLOW}仅 IPv4${PLAIN} (系统 IPv6: ${SYS_V6_STATUS} - ${RED}未生效${PLAIN})"
                 MARK_3="${YELLOW}●${PLAIN}" # 使用黄色圆点提示差异
             fi
             ;;
